@@ -2,13 +2,13 @@ name: "Deploy Apache Airflow DAGs to Astro"
 description: "Test your DAGs and deploy your Astro project to a Deployment on Astro, Astronomer's managed Airflow service."
 author: "Astronomer"
 branding:
-  icon: 'upload-cloud'
-  color: 'purple'
+  icon: "upload-cloud"
+  color: "purple"
 inputs:
   root-folder:
     required: false
     default: ./
-    description: "Path to the Astro project folder that contains the 'dags' folder."
+    description: "Path to the Astro project folder that contains the 'dags' or 'dbt' folder."
   parse:
     required: false
     default: false
@@ -32,7 +32,7 @@ inputs:
   action:
     required: false
     default: deploy
-    description: "Specify what action you would like to take. Use this option to create or delete deployment previews. Specify either 'create-deployment-preview', 'delete-deployment-preview' or 'deploy-deployment-preview'. Don't specify anything if you are deploying to a regular Deployment."
+    description: "Specify what action you would like to take. Use this option to create or delete deployment previews. Specify either 'create-deployment-preview', 'delete-deployment-preview', 'deploy-deployment-preview', or 'dbt-deploy'."
   deployment-name:
     required: false
     description: "The name of the Deployment you want to make preview from or are deploying to."
@@ -82,6 +82,10 @@ inputs:
   build-secrets:
     required: false
     description: "Mimics docker build --secret flag. See https://docs.docker.com/build/building/secrets/ for more information. Example input 'id=mysecret,src=secrets.txt'"
+  mount-path:
+    required: false
+    default: ""
+    description: "Path to mount the dbt project folder in Airflow."
 outputs:
   preview-id:
     description: "The ID of the created deployment preview. Only works when action=create-deployment-preview"
@@ -94,11 +98,15 @@ runs:
       uses: actions/checkout@v4
       if: inputs.checkout == 'true'
       with:
-        fetch-depth: 0  # Fetch all history
+        fetch-depth: 0 # Fetch only the latest commit
         ref: ${{ github.event.after }}
         clean: false
     - name: Install Astro CLI
       run: |
+        if [[ "${{ inputs.action }}" == "dbt-deploy" && "${{ inputs.cli-version }}" < "1.28.1"  ]]; then
+          echo "DBT Deploy requires Astro CLI version 1.28.1 or higher"
+          exit 1
+        fi
         curl -sSL https://install.astronomer.io | sudo bash -s ${{ inputs.cli-version }}
       shell: bash
     - name: Deployment Preview action
@@ -239,8 +247,8 @@ runs:
           ACTION=deploy-preview
         fi
 
-        # if action is deploy set final Deployment id to Deployment id
-        if [[ ${{ inputs.action }} == deploy ]]; then
+        # if action is deploy or dbt deploy simply set final Deployment id to Deployment id to streamline the deployment id reference in rest of the workflow
+        if [[ ${{ inputs.action }} == deploy || ${{ inputs.action }} == dbt-deploy ]]; then
           echo "FINAL_DEPLOYMENT_ID=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
 
           # don't skip deploy
@@ -250,7 +258,7 @@ runs:
           echo "IMAGE_DEPLOY_ONLY=false" >> $GITHUB_OUTPUT
 
           # set action
-          ACTION=deploy
+          ACTION=${{ inputs.action }}
         fi
 
         if [[ $ACTION == nothing ]]; then
@@ -268,8 +276,60 @@ runs:
         fi
       shell: bash
       id: dag-deploy-enabled
+    - name: Get DBT Deploy Options
+      run: |
+        if [[ "${{ inputs.action }}" != "dbt-deploy" ]]; then
+          echo "DBT_DEPLOY=0" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        cd ${{ inputs.root-folder }}
+        branch=$(echo "${GITHUB_REF#refs/heads/}")
+        echo "Branch pushed to: $branch"
+        git fetch origin $branch
+        files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }})
+        echo "files changed: $files"
+        dbt_deploy=0
+
+        for file in $files; do
+          if [[ $file == *"${{ inputs.root-folder }}"* ]]; then
+            echo $file is part of dbt folder, so would be triggering a dbt deploy also
+            dbt_deploy=1
+          fi
+        done
+
+        # validate that the DAG Deploy is enabled for the Deployment
+        if [[ ${{steps.dag-deploy-enabled.outputs.DAG_DEPLOY_ENABLED}} == false && dbt_deploy == 1 ]]; then
+          echo "Enable DAG Deploy for the Deployment in order to do a dbt deploy"
+          exit 1
+        fi
+
+        # validate tath mount path is provided
+        if [[ ${{ inputs.mount-path }} == "" && dbt_deploy == 1 ]]; then
+          echo "Mount path is required for dbt deploy"
+          exit 1
+        fi
+
+        options=""
+        if [[ $dbt_deploy == 1 ]]; then
+          options="$options --project-path=${{ inputs.root-folder }}"
+          options="$options --mount-path=${{ inputs.mount-path }}"
+
+          # Add description option
+          if [[ "${{ inputs.description }}" != '' ]]; then
+            options="$options --description '${{ inputs.description }}'"
+          fi
+        fi
+
+        echo "DBT_DEPLOY=$dbt_deploy" >> $GITHUB_OUTPUT
+        echo "DBT_OPTIONS=$options" >> $GITHUB_OUTPUT
+      shell: bash
+      id: dbt-deploy-options
     - name: Get Deployment Type
       run: |
+        # skip if the action is DBT Deploy
+        if [[ "${{ inputs.action }}" == "dbt-deploy" ]]; then
+          exit 0
+        fi
         cd ${{ inputs.root-folder }}
         branch=$(echo "${GITHUB_REF#refs/heads/}")
         echo "Branch pushed to: $branch"
@@ -306,6 +366,11 @@ runs:
     # If only DAGs changed and dag deploys is enabled, do a DAG-only deploy
     - name: setup deploy options
       run: |
+        # skip if the action is DBT Deploy
+        if [[ "${{ inputs.action }}" == "dbt-deploy" ]]; then
+          exit 0
+        fi
+
         options=""
 
         # add parse option
@@ -368,6 +433,12 @@ runs:
       run: |
         cd ${{ inputs.root-folder }}
         astro deploy ${{steps.deployment-preview.outputs.FINAL_DEPLOYMENT_ID}} ${{steps.deploy-options.outputs.OPTIONS}}
+      shell: bash
+    - name: DBT Deploy to Astro
+      if: steps.deployment-type.outputs.DBT_DEPLOY == 1
+      run: |
+        cd ${{ inputs.root-folder }}
+        astro dbt deploy ${{steps.deployment-preview.outputs.FINAL_DEPLOYMENT_ID}} ${{steps.dbt-deploy-options.outputs.DBT_OPTIONS}}
       shell: bash
     - name: Copy Airflow Connections, Variables, and Pools
       run: |
