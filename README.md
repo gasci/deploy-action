@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Deploy to Astro
-      uses: astronomer/deploy-action@v0.4
+      uses: astronomer/deploy-action@v0.6
       with:
         deployment-id: <deployment id>
         parse: true
@@ -112,7 +112,7 @@ In the following example, the folder `/example-dags/` is specified as the root f
 ```yaml
 steps:
 - name: Deploy to Astro
-  uses: astronomer/deploy-action@v0.4
+  uses: astronomer/deploy-action@v0.6
   with:
     deployment-id: <deployment id>
     root-folder: /example-dags/
@@ -125,7 +125,7 @@ In the following example, the pytest located at `/tests/test-tags.py` runs befor
 ```yaml
 steps:
 - name: Deploy to Astro
-  uses: astronomer/deploy-action@v0.4
+  uses: astronomer/deploy-action@v0.6
   with:
     deployment-id: <deployment id>
     pytest: true
@@ -139,7 +139,7 @@ In the following example, `force` is enabled and both the DAG parse and pytest p
 ```yaml
 steps:
 - name: Deploy to Astro
-  uses: astronomer/deploy-action@v0.4
+  uses: astronomer/deploy-action@v0.6
   with:
     deployment-id: <deployment id>
     force: true
@@ -182,11 +182,45 @@ jobs:
         build-args: |
           <your-build-arguments>
     - name: Deploy to Astro
-      uses: astronomer/deploy-action@v0.4
+      uses: astronomer/deploy-action@v0.6
       with:
         deployment-id: <deployment id>
         image-name: ${{ steps.image_tag.outputs.image_tag }}
 
+```
+
+### Deploy a DBT project
+
+In the following example we would be deploying the dbt project located at `dbt` folder in the Github repo
+
+```yaml
+steps:
+- name: DBT Deploy to Astro
+  uses: astronomer/deploy-action@v0.6
+  with:
+    deployment-id: <deployment id>
+    root-folder: dbt/
+    mount-path: /dbt
+```
+
+### Deploy DAGs anad DBT project from same repo
+
+In the following example we would setup a workflow to deploy dags/images located at `astro-project` and dbt deploy from dbt project located at `dbt` folder in the same Github repo
+
+```yaml
+steps:
+- name: DBT Deploy to Astro
+  uses: astronomer/deploy-action@v0.4
+  with:
+    deployment-id: <deployment id>
+    root-folder: dbt/
+    mount-path: /dbt
+- name: DAGs/Image Deploy to Astro
+  uses: astronomer/deploy-action@v0.6
+  with:
+    deployment-id: <deployment id>
+    root-folder: astro-project/
+    parse: true
 ```
 
 ## Deployment Preview Templates
@@ -217,7 +251,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Create Deployment Preview
-      uses: astronomer/deploy-action@v0.4
+      uses: astronomer/deploy-action@v0.6
       with:
         action: create-deployment-preview
         deployment-id: <orginal deployment id>
@@ -242,10 +276,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Deploy to Deployment Preview
-      uses: astronomer/deploy-action@v0.4
+      uses: astronomer/deploy-action@v0.6
       with:
         action: deploy-deployment-preview
         deployment-id: <orginal deployment id>
+```
+
+## DBT Deploy to Deployment Preview
+
+```yaml
+name: Astronomer - DBT Deploy code to Preview
+
+on:
+  pull_request:
+    branches:
+      - main
+
+env:
+  ## Sets Deployment API key credentials as environment variables
+  ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Deploy to Deployment Preview
+      uses: astronomer/deploy-action@v0.6
+      with:
+        action: dbt-deploy-deployment-preview
+        deployment-id: <orginal deployment id>
+        root-folder: dbt/
+        mount-path: /dbt
 ```
 
 ## Delete Deployment Preview
@@ -266,8 +327,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-    - name: Create Deployment Preview
-      uses: astronomer/deploy-action@v0.4
+    - name: Delete Deployment Preview
+      uses: astronomer/deploy-action@v0.6
       with:
         action: delete-deployment-preview
         deployment-id: <orginal deployment id>
@@ -292,7 +353,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Deploy to Astro
-      uses: astronomer/deploy-action@v0.4
+      uses: astronomer/deploy-action@v0.6
       with:
         deployment-id: <orginal deployment id>
 ```
